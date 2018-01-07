@@ -74,7 +74,7 @@ class CourseDetails(object):
         self.self_paced = None
         self.learning_info = []
         self.instructor_info = []
-        dump_course_info(course_id)
+        dump_course_info(org, course_id, run)
 
     @classmethod
     def fetch_about_attribute(cls, course_key, attribute):
