@@ -5,15 +5,14 @@ import re
 import logging
 
 from django.conf import settings
-from django.dispatch import Signal
 
 from xmodule.fields import Date
 from xmodule.modulestore.exceptions import ItemNotFoundError
+
+from hacks import dump_course_info
 from openedx.core.djangoapps.self_paced.models import SelfPacedConfiguration
 from openedx.core.lib.courses import course_image_url
 from xmodule.modulestore.django import modulestore
-
-COURSE_PACING_CHANGE = Signal(providing_args=["course_key", "course_self_paced"])
 
 
 # This list represents the attribute keys for a course's 'about' info.
@@ -75,6 +74,7 @@ class CourseDetails(object):
         self.self_paced = None
         self.learning_info = []
         self.instructor_info = []
+        dump_course_info(course_id)
 
     @classmethod
     def fetch_about_attribute(cls, course_key, attribute):
@@ -108,6 +108,7 @@ class CourseDetails(object):
         course_details = cls(course_key.org, course_key.course, course_key.run)
         course_details.start_date = course_descriptor.start
         course_details.end_date = course_descriptor.end
+        course_details.certificate_available_date = course_descriptor.certificate_available_date
         course_details.enrollment_start = course_descriptor.enrollment_start
         course_details.enrollment_end = course_descriptor.enrollment_end
         course_details.pre_requisite_courses = course_descriptor.pre_requisite_courses
@@ -191,7 +192,6 @@ class CourseDetails(object):
         descriptor = module_store.get_course(course_key)
 
         dirty = False
-        is_pacing_changed = False
 
         # In the descriptor's setter, the date is converted to JSON
         # using Date's to_json method. Calling to_json on something that
@@ -235,6 +235,15 @@ class CourseDetails(object):
             dirty = True
             descriptor.enrollment_end = converted
 
+        if 'certificate_available_date' in jsondict:
+            converted = date.from_json(jsondict['certificate_available_date'])
+        else:
+            converted = None
+
+        if converted != descriptor.certificate_available_date:
+            dirty = True
+            descriptor.certificate_available_date = converted
+
         if 'course_image_name' in jsondict and jsondict['course_image_name'] != descriptor.course_image:
             descriptor.course_image = jsondict['course_image_name']
             dirty = True
@@ -275,14 +284,9 @@ class CourseDetails(object):
                 and jsondict['self_paced'] != descriptor.self_paced):
             descriptor.self_paced = jsondict['self_paced']
             dirty = True
-            is_pacing_changed = True
 
         if dirty:
             module_store.update_item(descriptor, user.id)
-
-        # fires a signal indicating that the course pacing has changed
-        if is_pacing_changed:
-            COURSE_PACING_CHANGE.send(sender=None, course_key=course_key, course_self_paced=descriptor.self_paced)
 
         # NOTE: below auto writes to the db w/o verifying that any of
         # the fields actually changed to make faster, could compare
